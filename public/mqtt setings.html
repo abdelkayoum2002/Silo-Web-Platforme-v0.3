@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MQTT Configuration Panel</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="notification.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      background: #1e1e2f;
+      color: #fff;
+    }
+    h2 {
+      color: #4fc3f7;
+    }
+    .container {
+      max-width: 800px;
+      margin: auto;
+      background: #2b2b3c;
+      padding: 20px;
+      border-radius: 8px;
+    }
+    .status-bar {
+      padding: 10px;
+      text-align: center;
+      font-weight: bold;
+      border-radius: 6px;
+      margin-bottom: 15px;
+    }
+    .status-connected { background-color: #4caf50; color: white; }
+    .status-disconnected { background-color: #f44336; color: white; }
+    .status-reconnecting { background-color: #ff9800; color: black; }
+
+    .field {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      border: none;
+      border-radius: 4px;
+      background: #444;
+      color: #fff;
+    }
+    button {
+      padding: 6px 12px;
+      background: #4fc3f7;
+      border: none;
+      border-radius: 4px;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #03a9f4;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+    th, td {
+      border: 1px solid #555;
+      padding: 10px;
+      text-align: center;
+    }
+    th {
+      background-color: #3a3a4a;
+    }
+    td button {
+      margin: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="statusBar" class="status-bar status-disconnected">Disconnected</div>
+
+    <h2>MQTT Configuration</h2>
+    <div class="field"><label>URL</label><input id="url" /></div>
+    <div class="field"><label>Username</label><input id="username" /></div>
+    <div class="field"><label>Password</label><input id="password" type="password" /></div>
+    <div class="field"><label>Client ID</label><input id="clientId" /></div>
+    <button id="connectBtn">Connect</button>
+
+    <h2>Subscribe to Topic</h2>
+    <div class="field">
+      <label>Type</label>
+      <select id="topicType">
+        <option value="EmergencyTopic">EmergencyTopic</option>
+        <option value="AlertTopic">AlertTopic</option>
+        <option value="MessageTopic">MessageTopic</option>
+        <option value="CommandTopic">CommandTopic</option>
+        <option value="SensorTopic">SensorTopic</option>
+        <option value="StatusTopic">StatusTopic</option>
+      </select>
+    </div>
+    <div class="field"><label>Topic Name</label><input id="topicName" /></div>
+    <div class="field"><label>QoS</label><input id="topicQos" type="number" min="0" max="2" value="0" /></div>
+    <button id="addTopicBtn">Add Topic</button>
+
+    <h2>Subscribed Topics</h2>
+    <div id="topicList"></div>
+  </div>
+
+  <script>
+    const connectBtn = document.getElementById('connectBtn');
+    const statusBar = document.getElementById('statusBar');
+    const addTopicBtn = document.getElementById('addTopicBtn');
+    const topicListDiv = document.getElementById('topicList');
+
+    let connected = false;
+
+    function updateStatusBar(status) {
+      statusBar.classList.remove('status-connected', 'status-disconnected', 'status-reconnecting');
+      if (status === 'connected') {
+        statusBar.textContent = 'Connected';
+        statusBar.classList.add('status-connected');
+      } else if (status === 'disconnected') {
+        statusBar.textContent = 'Disconnected';
+        statusBar.classList.add('status-disconnected');
+      } else if (status === 'reconnect') {
+        statusBar.textContent = 'Reconnecting...';
+        statusBar.classList.add('status-reconnecting');
+      }
+    }
+
+    function renderTopics(topics) {
+      let html = `<table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Topic</th>
+            <th>QoS</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead><tbody>`;
+
+      for (const [type, topicArray] of Object.entries(topics)) {
+        topicArray.forEach(({ topic, qos, status }) => {
+          html += `<tr>
+            <td>${type}</td>
+            <td>${topic}</td>
+            <td>${qos}</td>
+            <td>${status}</td>
+            <td>
+              ${status === 'subscribe' ? `<button onclick="unsubscribeTopic('${topic}')">Unsubscribe</button>` 
+                                        : `<button onclick="subscribeTopic('${type}', '${topic}', ${qos})">Subscribe</button>`}
+              <button onclick="deleteTopic('${topic}')">Delete</button>
+            </td>
+          </tr>`;
+        });
+      }
+
+      html += `</tbody></table>`;
+      topicListDiv.innerHTML = html;
+    }
+
+    function unsubscribeTopic(topic) {
+      socket.emit('unsubscribe', topic);
+    }
+
+    function subscribeTopic(type, topic, qos) {
+      socket.emit('subscribe', { type, topic, qos });
+    }
+
+    function deleteTopic(topic) {
+      socket.emit('deleteTopic', topic);
+    }
+
+    socket.on('configuration', (config) => {
+      document.getElementById('url').value = config.url || '';
+      document.getElementById('username').value = config.options?.username || '';
+      document.getElementById('password').value = config.options?.password || '';
+      document.getElementById('clientId').value = config.options?.clientId || '';
+    });
+
+    socket.on('mqtt_status', (status) => {
+      console.log('MQTT status:', status);
+      updateStatusBar(status);
+      connected = status === 'connected';
+      connectBtn.textContent = connected ? 'Disconnect' : 'Connect';
+    });
+
+    socket.on('topics', (topics) => {
+      renderTopics(topics);
+    });
+
+    connectBtn.addEventListener('click', () => {
+      if (connected) {
+        socket.emit('mqtt_disconnect');
+      } else {
+        const configuration = {
+          url: document.getElementById('url').value,
+          options: {
+            username: document.getElementById('username').value,
+            password: document.getElementById('password').value,
+            clientId: document.getElementById('clientId').value,
+          }
+        };
+        socket.emit('mqtt_connect', configuration);
+      }
+    });
+
+    addTopicBtn.addEventListener('click', () => {
+      const type = document.getElementById('topicType').value;
+      const topic = document.getElementById('topicName').value.trim();
+      const qos = parseInt(document.getElementById('topicQos').value);
+
+      if (topic) {
+        socket.emit('subscribe', { type, topic, qos });
+      } else {
+        alert('Please provide a valid topic name and QoS.');
+      }
+    });
+  </script>
+</body>
+</html>

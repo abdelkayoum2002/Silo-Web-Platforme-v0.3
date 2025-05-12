@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Silo Monitoring Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="notification.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-dark: #1e1e2f;
+      --card-bg: #2e2e3e;
+      --text-light: #fff;
+      --connected-green: #4caf50;
+      --disconnected-red: #f44336;
+      --primary-blue: #2196f3;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-light);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .dashboard-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 20px;
+      padding: 20px;
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+    .silo-card {
+      background-color: var(--card-bg);
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.3);
+      cursor: pointer;
+      transition: transform 0.3s ease;
+      position: relative;
+    }
+    .silo-card:hover {
+      transform: scale(1.05);
+    }
+    .silo-card h2 {
+      margin-bottom: 15px;
+    }
+    .status {
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-weight: bold;
+      display: inline-block;
+    }
+    .connected {
+      background-color: var(--connected-green);
+    }
+    .disconnected {
+      background-color: var(--disconnected-red);
+    }
+    .silo-details {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: var(--bg-dark);
+      z-index: 1000;
+      overflow: hidden;
+    }
+    .silo-details-content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      padding: 20px;
+      height: 100%;
+      overflow: hidden;
+    }
+    .close-btn {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: var(--disconnected-red);
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 1001;
+    }
+    .sensor-info, .chart-container {
+      background-color: var(--card-bg);
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.3);
+      overflow: auto;
+    }
+    canvas {
+      width: 100% !important;
+      height: 300px !important;
+    }
+    @media (max-width: 768px) {
+      .silo-details-content {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1 style="padding: 20px;">Silo Monitoring Dashboard</h1>
+  
+  <div id="dashboard-container" class="dashboard-container">
+    <!-- Silo cards will be dynamically added here -->
+  </div>
+
+  <div id="silo-details" class="silo-details">
+    <button class="close-btn" onclick="closeSiloDetails()">&times;</button>
+    <div class="silo-details-content">
+      <div class="sensor-info">
+        <h2 id="silo-title">Silo Details</h2>
+        <p><strong>Silo ID:</strong> <span id="silo-id">-</span></p>
+        <p><strong>Connection Status:</strong> <span id="connection-status" class="status">-</span></p>
+        <p><strong>Ping:</strong> <span id="ping">-</span></p>
+        
+        <h3>Current Readings</h3>
+        <div class="current-readings">
+          <p><strong>Temperature:</strong> <span id="temperature">-</span>°C</p>
+          <p><strong>Humidity:</strong> <span id="humidity">-</span>%</p>
+          <p><strong>CO₂:</strong> <span id="co2">-</span> ppm</p>
+        </div>
+
+        <h3>Actuator Status</h3>
+        <div class="actuator-section" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <strong>Evaluator:</strong> <span id="evaluator">-</span>
+          </div>
+          <div>
+            <strong>Vane:</strong> <span id="vane">-</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-container">
+        <canvas id="sensor-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Dashboard JavaScript for Silo Monitoring
+
+// Socket.io connection
+
+// Chart configuration
+let sensorChart = null;
+
+// Function to create a silo card
+function createSiloCard(client) {
+  const card = document.createElement('div');
+  card.className = 'silo-card';
+  card.setAttribute('data-silo-id', client.id);
+  
+  const statusClass = client.connectionStatus.connected ? 'connected' : 'disconnected';
+  const pingText = client.connectionStatus.ping !== null ? `${client.connectionStatus.ping}ms` : 'N/A';
+
+  card.innerHTML = `
+    <h2>Silo ID: ${client.id}</h2>
+    <p><strong>Status:</strong> <span class="status ${statusClass}">
+      ${client.connectionStatus.connected ? 'Connected' : 'Disconnected'}
+    </span></p>
+    <p><strong>Ping:</strong> ${pingText}</p>
+    <p><strong>Temperature:</strong> ${client.sensorStatus.temperature ?? 'N/A'}°C</p>
+    <p><strong>Humidity:</strong> ${client.sensorStatus.humidity ?? 'N/A'}%</p>
+    <p><strong>CO₂:</strong> ${client.sensorStatus.co2 ?? 'N/A'} ppm</p>
+  `;
+
+  card.addEventListener('click', () => showSiloDetails(client));
+  return card;
+}
+
+// Show detailed view for a specific silo
+function showSiloDetails(client) {
+  document.getElementById('silo-details').style.display = 'block';
+  updateDashboard(client);
+}
+
+// Close silo details view
+function closeSiloDetails() {
+  document.getElementById('silo-details').style.display = 'none';
+}
+
+// Initialize chart
+function initChart() {
+  const ctx = document.getElementById('sensor-chart').getContext('2d');
+  sensorChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Temperature (°C)',
+          data: [],
+          borderColor: 'rgb(255, 99, 132)',
+          backgroundColor: 'rgba(255, 99, 132, 0.2)',
+          yAxisID: 'y',
+        },
+        {
+          label: 'Humidity (%)',
+          data: [],
+          borderColor: 'rgb(54, 162, 235)',
+          backgroundColor: 'rgba(54, 162, 235, 0.2)',
+          yAxisID: 'y1',
+        },
+        {
+          label: 'CO₂ (ppm)',
+          data: [],
+          borderColor: 'rgb(75, 192, 192)',
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          yAxisID: 'y2',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
+      stacked: false,
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          title: {
+            display: true,
+            text: 'Temperature (°C)'
+          }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          title: {
+            display: true,
+            text: 'Humidity (%)'
+          },
+          grid: {
+            drawOnChartArea: false,
+          }
+        },
+        y2: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          title: {
+            display: true,
+            text: 'CO₂ (ppm)'
+          },
+          grid: {
+            drawOnChartArea: false,
+          }
+        }
+      }
+    }
+  });
+}
+
+// Update chart with new data point
+function updateChart(temperature, humidity, co2) {
+  if (!sensorChart) return;
+
+  const now = new Date();
+  const timeLabel = now.toLocaleTimeString();
+
+  // Add new data point
+  sensorChart.data.labels.push(timeLabel);
+  sensorChart.data.datasets[0].data.push(temperature);
+  sensorChart.data.datasets[1].data.push(humidity);
+  sensorChart.data.datasets[2].data.push(co2);
+
+  // Limit to last 20 data points
+  if (sensorChart.data.labels.length > 20) {
+    sensorChart.data.labels.shift();
+    sensorChart.data.datasets[0].data.shift();
+    sensorChart.data.datasets[1].data.shift();
+    sensorChart.data.datasets[2].data.shift();
+  }
+
+  sensorChart.update();
+}
+
+// Update dashboard with silo information
+function updateDashboard(client) {
+  // Update silo title and ID
+  document.getElementById('silo-title').textContent = `Silo ${client.id} Details`;
+  document.getElementById('silo-id').textContent = client.id;
+
+  // Update connection status
+  const connectionStatus = document.getElementById('connection-status');
+  connectionStatus.textContent = client.connectionStatus.connected ? 'Connected' : 'Disconnected';
+  connectionStatus.className = `status ${client.connectionStatus.connected ? 'connected' : 'disconnected'}`;
+
+  // Update ping
+  document.getElementById('ping').textContent = 
+    client.connectionStatus.ping !== null ? `${client.connectionStatus.ping}ms` : 'N/A';
+
+  // Update sensor readings
+  document.getElementById('temperature').textContent = 
+    client.sensorStatus.temperature ?? 'N/A';
+  document.getElementById('humidity').textContent = 
+    client.sensorStatus.humidity ?? 'N/A';
+  document.getElementById('co2').textContent = 
+    client.sensorStatus.co2 ?? 'N/A';
+
+  // Update actuator status
+  document.getElementById('evaluator').textContent = 
+    client.actuatorStatus.evaluator ?? 'N/A';
+  document.getElementById('vane').textContent = 
+    client.actuatorStatus.vane ?? 'N/A';
+
+  // Reset and update chart
+  if (sensorChart) {
+    sensorChart.data.labels = [];
+    sensorChart.data.datasets.forEach(dataset => dataset.data = []);
+  }
+
+  // Update chart if valid numeric values exist
+  const temp = Number(client.sensorStatus.temperature);
+  const humidity = Number(client.sensorStatus.humidity);
+  const co2 = Number(client.sensorStatus.co2);
+
+  if (!isNaN(temp) && !isNaN(humidity) && !isNaN(co2)) {
+    updateChart(temp, humidity, co2);
+  }
+}
+
+// Update silos on the dashboard
+function updateSilos(silos) {
+  const container = document.getElementById('dashboard-container');
+  
+  // Clear existing cards
+  container.innerHTML = '';
+
+  // Create and add cards for each silo
+  silos.forEach(client => {
+    const siloCard = createSiloCard(client);
+    container.appendChild(siloCard);
+  });
+}
+
+// On page load
+document.addEventListener('DOMContentLoaded', () => {
+  // Initialize chart
+  initChart();
+
+  // Listen for silo updates
+  socket.on('silos', (silos) => {
+    updateSilos(silos);
+  });
+
+  // Close silo details when clicking outside
+  document.getElementById('silo-details').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) {
+      closeSiloDetails();
+    }
+  });
+});
+  </script>
+</body>
+</html>

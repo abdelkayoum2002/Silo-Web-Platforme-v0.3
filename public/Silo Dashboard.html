@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Silo Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="main.js"></script>
+  <style>
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #1e1e2f;
+      color: #fff;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .card {
+      background-color: #2e2e3e;
+      border-radius: 10px;
+      padding: 20px;
+      width: 300px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.3);
+      position: relative;
+    }
+    .card h2 {
+      margin-top: 0;
+    }
+    .status {
+      padding: 5px 10px;
+      border-radius: 5px;
+      font-weight: bold;
+      display: inline-block;
+    }
+    .connected {
+      background-color: #4caf50;
+    }
+    .disconnected {
+      background-color: #f44336;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 5px;
+    }
+    button {
+      background-color: #2196f3;
+      color: white;
+      border: none;
+      padding: 10px;
+      width: 100%;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background-color: #1976d2;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #f44336;
+      border: none;
+      color: white;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-weight: bold;
+      cursor: pointer;
+      line-height: 20px;
+      text-align: center;
+      padding: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Silo Dashboard</h1>
+
+  <div class="container" id="silo-container">
+    <!-- Add New Silo Card -->
+    <div class="card">
+      <h2>Add New Silo</h2>
+      <input type="text" id="new-silo-id" placeholder="Enter Silo ID" />
+      <button onclick="addSilo()">Add Silo</button>
+    </div>
+  </div>
+
+  <script>
+    const container = document.getElementById('silo-container');
+
+    function addSilo() {
+      const id = document.getElementById('new-silo-id').value.trim();
+      if (!id) {
+        alert('Please enter a silo ID.');
+        return;
+      }
+      socket.emit('add_silo', id);
+      document.getElementById('new-silo-id').value = '';
+    }
+
+    function deleteSilo(id) {
+      socket.emit('delete_silo', id);
+    }
+
+function createSiloCard(client) {
+  const statusClass = client.connectionStatus.connected ? 'connected' : 'disconnected';
+  const pingText = client.connectionStatus.ping !== null ? `${client.connectionStatus.ping}ms` : 'N/A';
+
+  return `
+    <div class="card" id="silo-${client.id}" onclick="location.href='dashboard.html?siloid=${client.id}'" style="cursor: pointer;">
+      <button class="delete-btn" onclick="event.stopPropagation(); deleteSilo('${client.id}')">&times;</button>
+      <h2>Silo ID: ${client.id}</h2>
+      <p><strong>Status:</strong> <span class="status ${statusClass}">
+        ${client.connectionStatus.connected ? 'Connected' : 'Disconnected'}
+      </span></p>
+      <p><strong>Ping:</strong> ${pingText}</p>
+      <p><strong>Temperature:</strong> ${client.sensorStatus.temperature ?? 'N/A'}°C</p>
+      <p><strong>Humidity:</strong> ${client.sensorStatus.humidity ?? 'N/A'}%</p>
+      <p><strong>CO₂:</strong> ${client.sensorStatus.co2 ?? 'N/A'} ppm</p>
+      <p><strong>Evaluator:</strong> ${client.actuatorStatus.evaluator ?? 'N/A'}</p>
+      <p><strong>Vane:</strong> ${client.actuatorStatus.vane ?? 'N/A'}</p>
+    </div>
+  `;
+}
+
+    function updateClients(clients) {
+      // Remove all old silo cards except the "Add Silo" card
+      const cards = document.querySelectorAll('.card');
+      cards.forEach(card => {
+        if (!card.querySelector('input')) card.remove();
+      });
+
+      // Add updated silo cards
+      clients.forEach(client => {
+        const cardHTML = createSiloCard(client);
+        container.insertAdjacentHTML('beforeend', cardHTML);
+      });
+    }
+
+ 
+    socket.on('silos', (silos) => {
+      updateClients(silos);
+    });
+  </script>
+
+</body>
+</html>
